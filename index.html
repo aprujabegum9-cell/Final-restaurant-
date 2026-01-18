@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>অ্যাডমিন প্যানেল | খিদে লাগছে</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@300;400;600;700&display=swap');
+        body { font-family: 'Hind Siliguri', sans-serif; background-color: #f3f4f6; }
+        .sidebar-active { border-left: 4px solid #ef4444; background: #fee2e2; color: #b91c1c; }
+        .hidden-section { display: none; }
+        .out-of-stock { opacity: 0.6; filter: grayscale(1); }
+        .modal-animate { animation: slideUp 0.3s ease-out; }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        
+        /* Image Upload Overlay Style */
+        .image-container { position: relative; width: 56px; height: 56px; }
+        .upload-overlay { 
+            position: absolute; inset: 0; background: rgba(0,0,0,0.4); 
+            display: flex; items-center; justify-content: center; 
+            color: white; border-radius: 1rem; opacity: 0; transition: 0.3s; cursor: pointer;
+        }
+        .image-container:hover .upload-overlay { opacity: 1; }
+    </style>
+</head>
+<body>
+
+    <!-- Alarm Sound -->
+    <audio id="order-sound" preload="auto" loop>
+        <source src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" type="audio/mpeg">
+    </audio>
+
+    <!-- New Order Notification Bar -->
+    <div id="alarm-overlay" class="hidden fixed top-0 left-0 w-full bg-green-600 text-white p-4 z-[200] flex justify-between items-center shadow-lg">
+        <p class="font-bold flex items-center gap-2"><i class="fas fa-utensils animate-bounce"></i> নতুন অর্ডার এসেছে!</p>
+        <button onclick="stopAlarm()" class="bg-white text-green-600 px-6 py-2 rounded-full font-black text-sm">অর্ডার দেখুন</button>
+    </div>
+
+    <!-- Login Screen -->
+    <div id="login-screen" class="fixed inset-0 bg-gray-900 flex items-center justify-center z-50 px-4">
+        <div class="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md">
+            <h2 class="text-3xl font-bold text-center text-red-600 mb-2">রেস্টুরেন্ট প্যানেল</h2>
+            <p class="text-center text-gray-500 mb-6 italic">আপনার রেস্টুরেন্ট ম্যানেজ করুন</p>
+            
+            <div id="res-selector-area">
+                <label class="block text-sm font-bold mb-2">রেস্টুরেন্ট আইডি দিয়ে প্রবেশ করুন:</label>
+                <input type="text" id="admin-res-id" placeholder="যেমন: 07" class="w-full p-4 mb-4 border rounded-xl outline-none focus:ring-2 focus:ring-red-500 font-bold">
+                <button onclick="accessRestaurant()" class="w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-red-700 mb-4 shadow-lg active:scale-95 transition">ওপেন প্যানেল</button>
+                
+                <div class="relative flex py-5 items-center">
+                    <div class="flex-grow border-t border-gray-300"></div>
+                    <span class="flex-shrink mx-4 text-gray-400 text-sm">অথবা</span>
+                    <div class="flex-grow border-t border-gray-300"></div>
+                </div>
+
+                <button onclick="toggleNewResForm()" class="w-full border-2 border-red-600 text-red-600 py-3 rounded-xl font-bold hover:bg-red-50 transition">নতুন রেস্টুরেন্ট রেজিস্টার</button>
+            </div>
+
+            <div id="new-res-form" class="hidden">
+                <h3 class="font-bold text-gray-700 mb-4 text-center">নতুন রেস্টুরেন্ট তথ্য</h3>
+                <input type="text" id="new-res-name" placeholder="রেস্টুরেন্টের নাম" class="w-full p-3 mb-3 border rounded-lg outline-none">
+                <input type="text" id="new-res-id" placeholder="আইডি নম্বর" class="w-full p-3 mb-3 border rounded-lg outline-none font-bold">
+                <input type="number" id="new-res-phone" placeholder="মোবাইল নম্বর" class="w-full p-3 mb-3 border rounded-lg outline-none">
+                <div class="flex gap-2">
+                    <button onclick="createNewRestaurant()" class="flex-1 bg-green-600 text-white py-3 rounded-lg font-bold shadow-md">সেভ করুন</button>
+                    <button onclick="toggleNewResForm()" class="flex-1 bg-gray-200 py-3 rounded-lg font-bold">বাতিল</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div id="main-content" class="hidden min-h-screen flex flex-col md:flex-row">
+        <!-- Sidebar -->
+        <div class="w-full md:w-64 bg-white shadow-md z-10 flex flex-col">
+            <div class="p-6 border-b bg-red-50 text-center">
+                <div class="relative w-24 h-24 mx-auto mb-4 group">
+                    <img id="res-profile-img" src="https://cdn-icons-png.flaticon.com/512/666/666201.png" class="w-full h-full object-cover rounded-full border-4 border-white shadow-md">
+                    <button onclick="uploadProfileImage()" class="absolute bottom-0 right-0 bg-red-600 text-white p-2 rounded-full shadow-lg hover:bg-red-700 transition">
+                        <i class="fas fa-camera text-xs"></i>
+                    </button>
+                </div>
+                <h1 id="display-res-name" class="text-xl font-black text-red-600 uppercase italic leading-tight">LOADING...</h1>
+                <p id="display-res-id" class="text-xs text-gray-500 font-bold mt-1"></p>
+                <button onclick="backToAdmin()" class="mt-4 text-[10px] bg-red-600 text-white px-3 py-1.5 rounded-full font-bold uppercase tracking-wider shadow-sm">Switch Account</button>
+            </div>
+            <nav class="mt-4 grow">
+                <button onclick="showSection('dashboard')" id="btn-dashboard" class="nav-btn w-full text-left px-6 py-4 flex items-center gap-3 sidebar-active font-bold transition"><i class="fas fa-chart-pie"></i> ড্যাশবোর্ড</button>
+                <button onclick="showSection('orders')" id="btn-orders" class="nav-btn w-full text-left px-6 py-4 flex items-center gap-3 text-gray-700 font-bold transition"><i class="fas fa-shopping-basket"></i> অর্ডারসমূহ</button>
+                <button onclick="showSection('menu')" id="btn-menu" class="nav-btn w-full text-left px-6 py-4 flex items-center gap-3 text-gray-700 font-bold transition"><i class="fas fa-utensils"></i> খাবারের মেনু</button>
+                <button onclick="showSection('gallery')" id="btn-gallery" class="nav-btn w-full text-left px-6 py-4 flex items-center gap-3 text-gray-700 font-bold transition"><i class="fas fa-images"></i> গ্যালারি</button>
+            </nav>
+        </div>
+
+        <main class="flex-1 p-4 md:p-8 overflow-y-auto">
+            <!-- Dashboard Section -->
+            <section id="sec-dashboard">
+                <h2 class="text-2xl font-black mb-6">ওভারভিউ</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+                    <div class="bg-white p-6 rounded-3xl shadow-sm border-b-4 border-red-500">
+                        <p class="text-gray-400 text-xs font-bold uppercase">মোট বিক্রি</p>
+                        <p class="text-3xl font-black text-gray-800" id="stat-res-revenue">৳ 0</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-3xl shadow-sm border-b-4 border-blue-500">
+                        <p class="text-gray-400 text-xs font-bold uppercase">মোট অর্ডার</p>
+                        <p class="text-3xl font-black text-gray-800" id="stat-res-orders">0</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Orders Section -->
+            <section id="sec-orders" class="hidden-section">
+                <h2 class="text-2xl font-black mb-6">সাম্প্রতিক অর্ডারসমূহ</h2>
+                <div id="res-orders-list" class="grid gap-4"></div>
+            </section>
+
+            <!-- Menu Section -->
+            <section id="sec-menu" class="hidden-section">
+                <div class="flex flex-wrap justify-between items-center mb-6 gap-4 bg-white p-6 rounded-3xl shadow-sm border">
+                    <div>
+                        <h2 class="text-2xl font-black text-gray-800">মেনু ম্যানেজমেন্ট</h2>
+                        <p class="text-sm text-gray-500">আপনার খাবারের তালিকা আপডেট করুন</p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button onclick="exportMenuData()" class="bg-gray-100 text-gray-700 px-4 py-2 rounded-xl font-bold text-xs hover:bg-gray-200 transition"><i class="fas fa-file-export mr-1"></i> এক্সপোর্ট</button>
+                        <button onclick="importMenuData()" class="bg-gray-100 text-gray-700 px-4 py-2 rounded-xl font-bold text-xs hover:bg-gray-200 transition"><i class="fas fa-file-import mr-1"></i> ইমপোর্ট</button>
+                        <button onclick="openMenuModal()" class="bg-red-600 text-white px-6 py-2.5 rounded-xl font-bold text-sm shadow-lg hover:bg-red-700 active:scale-95 transition">
+                            <i class="fas fa-plus mr-2"></i>নতুন খাবার যোগ করুন
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-3xl shadow-sm border overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead class="bg-gray-50 border-b">
+                                <tr>
+                                    <th class="p-5 text-xs font-bold uppercase text-gray-400 tracking-wider">সিলেক্ট</th>
+                                    <th class="p-5 text-xs font-bold uppercase text-gray-400 tracking-wider">খাবার</th>
+                                    <th class="p-5 text-xs font-bold uppercase text-gray-400 tracking-wider">ক্যাটাগরি</th>
+                                    <th class="p-5 text-xs font-bold uppercase text-gray-400 tracking-wider">মূল্য ও স্টক</th>
+                                    <th class="p-5 text-xs font-bold uppercase text-gray-400 tracking-wider text-right">অ্যাকশন</th>
+                                </tr>
+                            </thead>
+                            <tbody id="menu-table-body" class="divide-y divide-gray-100">
+                                <!-- Items will load here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Gallery Section -->
+            <section id="sec-gallery" class="hidden-section">
+                <h2 class="text-2xl font-black mb-6">ফটো গ্যালারি</h2>
+                <div id="gallery-grid" class="grid grid-cols-2 md:grid-cols-4 gap-4"></div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Professional Menu Item Modal -->
+    <div id="menu-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[250] flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl modal-animate">
+            <div class="p-6 border-b flex justify-between items-center bg-gray-50">
+                <h3 class="text-xl font-black text-gray-800">নতুন খাবার যোগ করুন</h3>
+                <button onclick="closeMenuModal()" class="text-gray-400 hover:text-red-600 transition"><i class="fas fa-times text-xl"></i></button>
+            </div>
+            <div class="p-6 space-y-4">
+                <!-- Image Upload Area -->
+                <div class="flex flex-col items-center">
+                    <div id="image-upload-box" onclick="document.getElementById('item-image-input').click()" class="relative w-32 h-32 border-2 border-dashed border-gray-300 rounded-2xl flex flex-col items-center justify-center cursor-pointer hover:border-red-400 transition overflow-hidden bg-gray-50">
+                        <img id="item-preview" class="hidden absolute inset-0 w-full h-full object-cover">
+                        <div id="upload-placeholder" class="text-center">
+                            <i class="fas fa-cloud-upload-alt text-2xl text-gray-400 mb-1"></i>
+                            <p class="text-[10px] font-bold text-gray-500 uppercase">ছবি দিন</p>
+                        </div>
+                    </div>
+                    <input type="file" id="item-image-input" class="hidden" accept="image/*" onchange="previewItemImage(this)">
+                    
+                    <div class="mt-3 flex items-center gap-2">
+                        <input type="checkbox" id="upload-later" class="w-4 h-4 accent-red-600" onchange="toggleImageRequirement(this)">
+                        <label for="upload-later" class="text-sm font-bold text-gray-600">ছবি পরে আপলোড করব</label>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1 ml-1">খাবারের নাম</label>
+                        <input type="text" id="item-name" placeholder="যেমন: চিকেন বিরিয়ানি" class="w-full p-3 bg-gray-50 border rounded-xl outline-none focus:ring-2 focus:ring-red-500 font-bold">
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1 ml-1">মূল্য (৳)</label>
+                            <input type="number" id="item-price" placeholder="250" class="w-full p-3 bg-gray-50 border rounded-xl outline-none focus:ring-2 focus:ring-red-500 font-bold">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1 ml-1">ক্যাটাগরি</label>
+                            <select id="item-category" class="w-full p-3 bg-gray-50 border rounded-xl outline-none focus:ring-2 focus:ring-red-500 font-bold">
+                                <option value="Main Course">মেইন কোর্স</option>
+                                <option value="Fast Food">ফাস্ট ফুড</option>
+                                <option value="Drinks">পানীয়</option>
+                                <option value="Dessert">ডেজার্ট</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 p-3 bg-red-50 rounded-xl border border-red-100">
+                        <input type="checkbox" id="item-variants" class="w-5 h-5 accent-red-600">
+                        <label for="item-variants" class="text-sm font-bold text-red-800">হাফ (Half) ও ফুল (Full) সাইজ আছে?</label>
+                    </div>
+                </div>
+            </div>
+            <div class="p-6 bg-gray-50 flex gap-3">
+                <button onclick="closeMenuModal()" class="flex-1 py-3 font-bold text-gray-600 hover:bg-gray-200 rounded-xl transition">বাতিল</button>
+                <button id="save-item-btn" onclick="processNewMenuItem()" class="flex-1 py-3 bg-red-600 text-white font-black rounded-xl shadow-lg hover:bg-red-700 active:scale-95 transition">সেভ করুন</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyD_TytbX1kd4SKQ5uHZfd5XVGwdw0gzUOE",
+            authDomain: "feeling-hungry-102a9.firebaseapp.com",
+            databaseURL: "https://feeling-hungry-102a9-default-rtdb.firebaseio.com",
+            projectId: "feeling-hungry-102a9",
+            storageBucket: "feeling-hungry-102a9.firebasestorage.app",
+            messagingSenderId: "736201265500",
+            appId: "1:736201265500:web:7b7064b314247c02ad7199"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+        const IMGBB_API_KEY = "fc3ee99e2af1e71037e9064380889347"; 
+
+        let currentRes = null;
+        let lastOrderCount = 0;
+
+        function accessRestaurant() {
+            const idNo = document.getElementById('admin-res-id').value.trim();
+            if(!idNo) return alert("রেস্টুরেন্ট আইডি দিন!");
+            db.ref('restaurants').once('value', snap => {
+                const restaurants = snap.val();
+                let foundRes = null;
+                for (let key in restaurants) {
+                    if (restaurants[key].idNo == idNo) {
+                        foundRes = { ...restaurants[key], fireKey: key };
+                        break;
+                    }
+                }
+                if (foundRes) {
+                    currentRes = foundRes;
+                    localStorage.setItem('admin_session', JSON.stringify(currentRes));
+                    startSession();
+                } else { alert("ভুল আইডি!"); }
+            });
+        }
+
+        function createNewRestaurant() {
+            const name = document.getElementById('new-res-name').value.trim();
+            const idNo = document.getElementById('new-res-id').value.trim();
+            const phone = document.getElementById('new-res-phone').value.trim();
+            if(!name || !idNo || !phone) return alert("তথ্য পূরণ করুন!");
+            db.ref('restaurants').push({
+                name: name, idNo: idNo, phone: phone, status: "APPROVED",
+                address: "Not Provided", deliveryCharge: 0, lat: 23.8, lng: 90.4, logo: ""
+            }).then(() => { alert("সফল!"); toggleNewResForm(); });
+        }
+
+        function toggleNewResForm() {
+            document.getElementById('res-selector-area').classList.toggle('hidden');
+            document.getElementById('new-res-form').classList.toggle('hidden');
+        }
+
+        function startSession() {
+            const session = localStorage.getItem('admin_session');
+            if (session) {
+                currentRes = JSON.parse(session);
+                document.getElementById('login-screen').classList.add('hidden');
+                document.getElementById('main-content').classList.remove('hidden');
+                document.getElementById('display-res-name').innerText = currentRes.name;
+                document.getElementById('display-res-id').innerText = "ID: " + currentRes.idNo;
+                if(currentRes.logo) document.getElementById('res-profile-img').src = currentRes.logo;
+                loadResData();
+            }
+        }
+
+        function loadResData() {
+            db.ref('orders').on('value', snap => {
+                const all = snap.val() || {};
+                const mine = {};
+                Object.keys(all).forEach(k => {
+                    if(all[k].restaurantName?.toLowerCase() === currentRes.name.toLowerCase()) mine[k] = all[k];
+                });
+                if(Object.keys(mine).length > lastOrderCount && lastOrderCount !== 0) startAlarm();
+                lastOrderCount = Object.keys(mine).length;
+                renderOrders(mine);
+            });
+
+            db.ref(`menus/${currentRes.idNo}`).on('value', snap => {
+                const menuData = snap.val() || {};
+                renderMenu(menuData);
+                renderGallery(menuData);
+            });
+        }
+
+        function renderOrders(orders) {
+            const container = document.getElementById('res-orders-list');
+            let rev = 0; container.innerHTML = "";
+            Object.keys(orders).reverse().forEach(id => {
+                const o = orders[id];
+                if(o.status === 'DELIVERED') rev += parseFloat(o.total || 0);
+                container.innerHTML += `
+                    <div class="bg-white p-4 rounded-2xl shadow-sm border flex justify-between items-center">
+                        <div><p class="text-xs font-bold text-gray-400">#${id.slice(-5)}</p>
+                        <h3 class="font-bold">৳ ${o.total}</h3><p class="text-xs">${o.status}</p></div>
+                        <div class="flex gap-2">
+                            <button onclick="updateStatus('${id}','ACCEPTED')" class="bg-blue-500 text-white px-3 py-1 rounded-lg text-xs">Accept</button>
+                            <button onclick="updateStatus('${id}','DELIVERED')" class="bg-green-500 text-white px-3 py-1 rounded-lg text-xs">Done</button>
+                        </div>
+                    </div>`;
+            });
+            document.getElementById('stat-res-revenue').innerText = '৳ ' + rev;
+            document.getElementById('stat-res-orders').innerText = Object.keys(orders).length;
+        }
+
+        function renderMenu(menuData) {
+            const container = document.getElementById('menu-table-body');
+            container.innerHTML = "";
+            Object.keys(menuData).forEach(id => {
+                const item = menuData[id];
+                const isAvailable = item.available !== false;
+                container.innerHTML += `
+                <tr class="hover:bg-gray-50 transition ${!isAvailable ? 'bg-gray-50' : ''}">
+                    <td class="p-5">
+                        <input type="checkbox" class="w-5 h-5 rounded accent-red-600 cursor-pointer">
+                    </td>
+                    <td class="p-5 flex items-center gap-4">
+                        <!-- Image Container with Upload Option -->
+                        <div class="image-container group">
+                            <img src="${item.image}" class="w-full h-full rounded-2xl object-cover border shadow-sm ${!isAvailable ? 'grayscale' : ''}">
+                            <div onclick="updateItemImage('${id}')" class="upload-overlay">
+                                <i class="fas fa-camera text-sm"></i>
+                            </div>
+                        </div>
+                        <div>
+                            <p class="font-black text-gray-800 leading-tight">${item.name}</p>
+                            <p class="text-[10px] text-gray-400 uppercase font-bold tracking-tighter mt-0.5">ID: ${id.slice(-4)}</p>
+                        </div>
+                    </td>
+                    <td class="p-5">
+                        <span class="text-[10px] bg-gray-100 text-gray-600 px-2 py-1 rounded-md font-black uppercase">${item.category || 'Food'}</span>
+                    </td>
+                    <td class="p-5">
+                        <div class="flex flex-col">
+                            <span class="${isAvailable ? 'text-red-600' : 'text-gray-400'} font-black text-lg">৳${item.price}</span>
+                            <button onclick="toggleAvailability('${id}', ${isAvailable})" class="mt-1 text-[10px] w-fit px-2 py-0.5 rounded-full font-bold uppercase transition ${isAvailable ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-gray-200 text-gray-500 hover:bg-gray-300'}">
+                                ${isAvailable ? 'স্টক আছে' : 'স্টক শেষ'}
+                            </button>
+                        </div>
+                    </td>
+                    <td class="p-5 text-right">
+                        <div class="flex justify-end gap-2">
+                            <button onclick="editPrice('${id}', ${item.price})" class="bg-yellow-50 text-yellow-600 p-2.5 rounded-xl hover:bg-yellow-600 hover:text-white transition shadow-sm">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button onclick="duplicateMenuItem('${id}')" class="bg-blue-50 text-blue-600 p-2.5 rounded-xl hover:bg-blue-600 hover:text-white transition shadow-sm">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                            <button onclick="deleteMenuItem('${id}')" class="bg-red-50 text-red-600 p-2.5 rounded-xl hover:bg-red-600 hover:text-white transition shadow-sm">
+                                <i class="fas fa-trash-alt"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>`;
+            });
+        }
+
+        function renderGallery(menuData) {
+            const container = document.getElementById('gallery-grid');
+            container.innerHTML = "";
+            Object.keys(menuData).forEach(id => {
+                const item = menuData[id];
+                const isAvailable = item.available !== false;
+                container.innerHTML += `
+                    <div class="relative group aspect-square rounded-2xl overflow-hidden border-2 border-white shadow-sm bg-white">
+                        <img src="${item.image}" class="w-full h-full object-cover ${!isAvailable ? 'grayscale blur-[1px]' : ''}">
+                        ${!isAvailable ? '<div class="absolute inset-0 flex items-center justify-center bg-black/20"><span class="bg-red-600 text-white px-3 py-1 rounded-full text-xs font-black">STOCK OUT</span></div>' : ''}
+                        <div class="absolute top-2 right-2 flex flex-col gap-2 translate-x-10 group-hover:translate-x-0 opacity-0 group-hover:opacity-100 transition duration-300">
+                            <button onclick="updateItemImage('${id}')" class="bg-white text-blue-600 w-8 h-8 rounded-lg shadow-lg flex items-center justify-center"><i class="fas fa-camera text-xs"></i></button>
+                            <button onclick="editPrice('${id}', ${item.price})" class="bg-white text-yellow-600 w-8 h-8 rounded-lg shadow-lg flex items-center justify-center"><i class="fas fa-edit text-xs"></i></button>
+                            <button onclick="deleteMenuItem('${id}')" class="bg-white text-red-600 w-8 h-8 rounded-lg shadow-lg flex items-center justify-center"><i class="fas fa-trash-alt text-xs"></i></button>
+                        </div>
+                        <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3 text-white">
+                            <p class="text-[10px] font-black leading-tight truncate">${item.name}</p>
+                            <p class="text-xs font-black text-red-400">৳${item.price}</p>
+                        </div>
+                    </div>`;
+            });
+        }
+
+        // --- Update Existing Item Image ---
+        async function updateItemImage(itemId) {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.onchange = async () => {
+                const file = input.files[0];
+                if(!file) return;
+
+                const fd = new FormData();
+                fd.append('image', file);
+
+                try {
+                    // Show Loading state
+                    alert("ছবি আপলোড হচ্ছে, দয়া করে অপেক্ষা করুন...");
+                    const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, { method: 'POST', body: fd });
+                    const json = await res.json();
+                    
+                    if(json.success) {
+                        const newUrl = json.data.url;
+                        await db.ref(`menus/${currentRes.idNo}/${itemId}`).update({ image: newUrl });
+                        alert("ছবি সফলভাবে আপডেট হয়েছে!");
+                    } else {
+                        alert("আপলোড ব্যর্থ হয়েছে!");
+                    }
+                } catch (e) {
+                    alert("সার্ভার ত্রুটি!");
+                }
+            };
+            input.click();
+        }
+
+        function openMenuModal() { 
+            document.getElementById('menu-modal').classList.remove('hidden'); 
+        }
+
+        function closeMenuModal() { 
+            document.getElementById('menu-modal').classList.add('hidden');
+            resetModalFields();
+        }
+
+        function previewItemImage(input) {
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = e => {
+                    document.getElementById('item-preview').src = e.target.result;
+                    document.getElementById('item-preview').classList.remove('hidden');
+                    document.getElementById('upload-placeholder').classList.add('hidden');
+                };
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+
+        function toggleImageRequirement(cb) {
+            const uploadBox = document.getElementById('image-upload-box');
+            if(cb.checked) {
+                uploadBox.style.opacity = "0.4";
+                uploadBox.style.pointerEvents = "none";
+            } else {
+                uploadBox.style.opacity = "1";
+                uploadBox.style.pointerEvents = "auto";
+            }
+        }
+
+        async function processNewMenuItem() {
+            const name = document.getElementById('item-name').value.trim();
+            const price = document.getElementById('item-price').value.trim();
+            const cat = document.getElementById('item-category').value;
+            const hasVariants = document.getElementById('item-variants').checked;
+            const imageFile = document.getElementById('item-image-input').files[0];
+            const uploadLater = document.getElementById('upload-later').checked;
+
+            if(!name || !price) return alert("খাবারের নাম ও মূল্য দিন!");
+            if(!uploadLater && !imageFile) return alert("খাবারের ছবি দিন অথবা 'পরে আপলোড করব' সিলেক্ট করুন!");
+
+            const btn = document.getElementById('save-item-btn');
+            btn.innerText = "প্রসেস হচ্ছে..."; btn.disabled = true;
+
+            let imgUrl = "https://via.placeholder.com/500x500.png?text=No+Image"; 
+
+            try {
+                if(!uploadLater && imageFile) {
+                    const fd = new FormData();
+                    fd.append('image', imageFile);
+                    const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, { method: 'POST', body: fd });
+                    const json = await res.json();
+                    if(json.success) imgUrl = json.data.url;
+                }
+                
+                if(hasVariants) {
+                    const hPrice = prompt(name + " (Half) মূল্য (৳):", price);
+                    const fPrice = prompt(name + " (Full) মূল্য (৳):", (parseFloat(price)*1.8).toFixed(0));
+                    
+                    await db.ref(`menus/${currentRes.idNo}`).push({ name: name + " (Half)", price: parseFloat(hPrice), image: imgUrl, category: cat, available: true });
+                    await db.ref(`menus/${currentRes.idNo}`).push({ name: name + " (Full)", price: parseFloat(fPrice), image: imgUrl, category: cat, available: true });
+                } else {
+                    await db.ref(`menus/${currentRes.idNo}`).push({ name: name, price: parseFloat(price), image: imgUrl, category: cat, available: true });
+                }
+                alert("মেনু সফলভাবে যোগ হয়েছে!");
+                closeMenuModal();
+            } catch (e) {
+                alert("ত্রুটি হয়েছে!");
+            } finally {
+                btn.innerText = "সেভ করুন"; btn.disabled = false;
+            }
+        }
+
+        function resetModalFields() {
+            document.getElementById('item-name').value = "";
+            document.getElementById('item-price').value = "";
+            document.getElementById('item-image-input').value = "";
+            document.getElementById('item-preview').classList.add('hidden');
+            document.getElementById('upload-placeholder').classList.remove('hidden');
+            document.getElementById('item-variants').checked = false;
+            document.getElementById('upload-later').checked = false;
+            document.getElementById('image-upload-box').style.opacity = "1";
+            document.getElementById('image-upload-box').style.pointerEvents = "auto";
+        }
+
+        async function uploadProfileImage() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.onchange = async () => {
+                const file = input.files[0];
+                if(!file) return;
+
+                const imgEl = document.getElementById('res-profile-img');
+                const originalSrc = imgEl.src;
+                imgEl.style.opacity = '0.5';
+
+                const fd = new FormData();
+                fd.append('image', file);
+
+                try {
+                    const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, { method: 'POST', body: fd });
+                    const json = await res.json();
+                    if(json.success) {
+                        const newUrl = json.data.url;
+                        await db.ref(`restaurants/${currentRes.fireKey}`).update({ logo: newUrl });
+                        currentRes.logo = newUrl;
+                        localStorage.setItem('admin_session', JSON.stringify(currentRes));
+                        imgEl.src = newUrl;
+                        alert("প্রোফাইল ছবি আপডেট হয়েছে!");
+                    }
+                } catch (e) {
+                    alert("আপলোড ব্যর্থ হয়েছে!");
+                    imgEl.src = originalSrc;
+                } finally {
+                    imgEl.style.opacity = '1';
+                }
+            };
+            input.click();
+        }
+
+        function editPrice(id, currentPrice) {
+            const newPrice = prompt("খাবারের নতুন মূল্য লিখুন (৳):", currentPrice);
+            if (newPrice !== null && newPrice !== "" && !isNaN(newPrice)) {
+                db.ref(`menus/${currentRes.idNo}/${id}`).update({ price: parseFloat(newPrice) });
+            }
+        }
+
+        function duplicateMenuItem(id) {
+            if(confirm("আপনি কি এই খাবারটির একটি কপি তৈরি করতে চান?")) {
+                db.ref(`menus/${currentRes.idNo}/${id}`).once('value', snap => {
+                    const originalData = snap.val();
+                    if(originalData) {
+                        const duplicateData = { ...originalData, name: originalData.name + " (Copy)" };
+                        db.ref(`menus/${currentRes.idNo}`).push(duplicateData);
+                    }
+                });
+            }
+        }
+
+        function exportMenuData() {
+            db.ref(`menus/${currentRes.idNo}`).once('value', snap => {
+                const data = snap.val();
+                if(!data) return alert("রপ্তানি করার মতো কোনো মেনু নেই!");
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `menu_backup_${currentRes.idNo}.json`;
+                a.click();
+            });
+        }
+
+        function importMenuData() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = e => {
+                const file = e.target.files[0];
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    try {
+                        const importedData = JSON.parse(event.target.result);
+                        if(confirm("এটি বর্তমান মেনু মুছে ফেলবে। নিশ্চিত?")) {
+                            await db.ref(`menus/${currentRes.idNo}`).set(importedData);
+                            alert("ইমপোর্ট সফল!");
+                        }
+                    } catch (err) { alert("ভুল ফাইল!"); }
+                };
+                reader.readAsText(file);
+            };
+            input.click();
+        }
+
+        function toggleAvailability(id, currentStatus) {
+            db.ref(`menus/${currentRes.idNo}/${id}`).update({ available: !currentStatus });
+        }
+
+        function deleteMenuItem(id) { 
+            if(confirm("মুছে ফেলতে চান?")) db.ref(`menus/${currentRes.idNo}/${id}`).remove(); 
+        }
+
+        function updateStatus(id, s) { db.ref(`orders/${id}`).update({ status: s }); }
+        
+        function showSection(id) {
+            document.querySelectorAll('main section').forEach(s => s.classList.add('hidden-section'));
+            document.getElementById('sec-'+id).classList.remove('hidden-section');
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('sidebar-active'));
+            document.getElementById('btn-'+id).classList.add('sidebar-active');
+        }
+
+        function startAlarm() { document.getElementById('alarm-overlay').classList.remove('hidden'); document.getElementById('order-sound').play(); }
+        function stopAlarm() { document.getElementById('alarm-overlay').classList.add('hidden'); document.getElementById('order-sound').pause(); showSection('orders'); }
+        function backToAdmin() { localStorage.removeItem('admin_session'); location.reload(); }
+
+        window.onload = startSession;
+    </script>
+</body>
+</html>
